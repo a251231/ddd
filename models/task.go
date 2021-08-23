@@ -15,19 +15,20 @@ import (
 
 type Task struct {
 	ID      int
+	EntryID int
 	Cron    string
 	Path    string
-	Enable  bool
+	Enable  string
 	Mode    string
 	Word    string
 	Name    string
 	Timeout int
-	Envs    []Env
 	Args    string
-	Hack    bool
+	Hack    string
 	Git     string
 	Title   string
-	Running bool
+	Running string
+	Envs    []Env `gorm:"-"`
 }
 
 type Env struct {
@@ -56,7 +57,7 @@ func createTask(task *Task) {
 }
 
 func runTask(task *Task, msgs ...interface{}) string {
-	task.Running = true
+	task.Running = True
 	path := ""
 	if task.Git != "" {
 		path = task.Git + "/" + task.Name
@@ -108,16 +109,20 @@ func runTask(task *Task, msgs ...interface{}) string {
 	if strings.Contains(task.Name, ".py") {
 		lan = Config.Python
 	}
-	envs := ""
+	// envs := ""
+	// for _, env := range task.Envs {
+	// 	envs += fmt.Sprintf("export %s=\"%s\"", env.Name, env.Value)
+	// }
+	// 	sh := fmt.Sprintf(`
+	// %s
+	// %s %s
+	// 	`, envs,
+	// 		lan, task.Name)
+	// cmd := exec.Command("sh", "-c", sh)
+	cmd := exec.Command(lan, task.Name)
 	for _, env := range task.Envs {
-		envs += fmt.Sprintf("export %s=\"%s\"", env.Name, env.Value)
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", env.Name, env.Value))
 	}
-	sh := fmt.Sprintf(`
-%s
-%s %s
-	`, envs,
-		lan, task.Name)
-	cmd := exec.Command("sh", "-c", sh)
 	stdout, err := cmd.StdoutPipe()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -167,6 +172,6 @@ func runTask(task *Task, msgs ...interface{}) string {
 	if msg != "" {
 		sendMessagee(msg, msgs...)
 	}
-	task.Running = false
+	task.Running = False
 	return msg
 }
