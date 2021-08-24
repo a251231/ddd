@@ -3,7 +3,6 @@ package models
 import (
 	"fmt"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -46,28 +45,6 @@ func InitReplies() {
 	}
 	if _, ok := replies["壁纸"]; !ok {
 		replies["壁纸"] = "https://acg.toubiec.cn/random.php"
-	}
-}
-
-var sendMessagee = func(msg string, msgs ...interface{}) {
-	if len(msgs) == 0 {
-		return
-	}
-	tp := msgs[1].(string)
-	uid := msgs[2].(int)
-	gid := 0
-	if len(msgs) >= 4 {
-		gid = msgs[3].(int)
-	}
-	switch tp {
-	case "tg":
-		SendTgMsg(uid, msg)
-	case "tgg":
-		SendTggMsg(gid, uid, msg, msgs[4].(int), msgs[5].(string))
-	case "qq":
-		SendQQ(int64(uid), msg)
-	case "qqg":
-		SendQQGroup(int64(gid), int64(uid), msg)
 	}
 }
 
@@ -139,7 +116,7 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 							ck.Telegram = sender.UserID
 						}
 						if HasKey(ck.PtKey) {
-							sendMessagee(fmt.Sprintf("作弊，许愿币-1，余额%d", RemCoin(sender.UserID, 1)), msgs...)
+							sender.Reply(fmt.Sprintf("作弊，许愿币-1，余额%d", RemCoin(sender.UserID, 1)))
 						} else {
 							if nck, err := GetJdCookie(ck.PtPin); err == nil {
 								nck.InPool(ck.PtKey)
@@ -152,12 +129,12 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 								}
 								NewJdCookie(&ck)
 								msg := fmt.Sprintf("添加账号，%s", ck.PtPin)
-								sendMessagee(fmt.Sprintf("很棒，许愿币+1，余额%d", AddCoin(sender.UserID)), msgs...)
+								sender.Reply(fmt.Sprintf("很棒，许愿币+1，余额%d", AddCoin(sender.UserID)))
 								logs.Info(msg)
 							}
 						}
 					} else {
-						sendMessagee(fmt.Sprintf("无效，许愿币-1，余额%d", RemCoin(sender.UserID, 1)), msgs...)
+						sender.Reply(fmt.Sprintf("无效，许愿币-1，余额%d", RemCoin(sender.UserID, 1)))
 					}
 				}
 				go func() {
@@ -167,37 +144,8 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 			}
 		}
 		{
-			o := false
-			for _, v := range regexp.MustCompile(`京东账号\d*（(.*)）(.*)】(\S*)`).FindAllStringSubmatch(msg, -1) {
-				if !strings.Contains(v[3], "种子") && !strings.Contains(v[3], "undefined") {
-					pt_pin := url.QueryEscape(v[1])
-					for key, ss := range map[string][]string{
-						"Fruit":        {"京东农场", "东东农场"},
-						"Pet":          {"京东萌宠"},
-						"Bean":         {"种豆得豆"},
-						"JdFactory":    {"东东工厂"},
-						"DreamFactory": {"京喜工厂"},
-						"Jxnc":         {"京喜农场"},
-						"Jdzz":         {"京东赚赚"},
-						"Joy":          {"crazyJoy"},
-						"Sgmh":         {"闪购盲盒"},
-						"Cfd":          {"财富岛"},
-						"Cash":         {"签到领现金"},
-					} {
-						for _, s := range ss {
-							if strings.Contains(v[2], s) && v[3] != "" {
-								if ck, err := GetJdCookie(pt_pin); err == nil {
-									ck.Update(key, v[3])
-								}
-								if !o {
-									o = true
-								}
-							}
-						}
-					}
-				}
-			}
-			if o {
+			o := findShareCode(msg)
+			if o != "" {
 				return "导入互助码成功"
 			}
 		}
