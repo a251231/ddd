@@ -64,6 +64,7 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 	if sender.Type == "tgg" {
 		sender.MessageID = msgs[4].(int)
 		sender.Username = msgs[5].(string)
+		sender.ReplySenderUserID = msgs[6].(int)
 	}
 	if sender.UserID == Config.TelegramUserID || sender.UserID == int(Config.QQID) {
 		sender.IsAdmin = true
@@ -101,7 +102,9 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 		}
 		{ //
 			ss := regexp.MustCompile(`pt_key=([^;=\s]+);pt_pin=([^;=\s]+)`).FindAllStringSubmatch(msg, -1)
+
 			if len(ss) > 0 {
+
 				xyb := 0
 				for _, s := range ss {
 					ck := JdCookie{
@@ -116,7 +119,7 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 							ck.Telegram = sender.UserID
 						}
 						if HasKey(ck.PtKey) {
-							sender.Reply(fmt.Sprintf("作弊，许愿币-1，余额%d", RemCoin(sender.UserID, 1)))
+							sender.Reply(fmt.Sprintf("重复提交"))
 						} else {
 							if nck, err := GetJdCookie(ck.PtPin); err == nil {
 								nck.InPool(ck.PtKey)

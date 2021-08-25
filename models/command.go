@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -18,13 +19,14 @@ type CodeSignal struct {
 }
 
 type Sender struct {
-	UserID    int
-	ChatID    int
-	Type      string
-	Contents  []string
-	MessageID int
-	Username  string
-	IsAdmin   bool
+	UserID            int
+	ChatID            int
+	Type              string
+	Contents          []string
+	MessageID         int
+	Username          string
+	IsAdmin           bool
+	ReplySenderUserID int
 }
 
 func (sender *Sender) Reply(msg string) {
@@ -52,7 +54,7 @@ func (sender *Sender) IsTG() bool {
 	return strings.Contains(sender.Type, "tg")
 }
 
-func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) {
+func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) error {
 	cks := GetJdCookies()
 	a := sender.JoinContens()
 	ok := false
@@ -76,46 +78,20 @@ func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) {
 		}
 		if !ok {
 			sender.Reply("你尚未绑定🐶东账号，请对我说扫码，扫码后即可查询账户资产信息。")
+			return errors.New("你尚未绑定🐶东账号，请对我说扫码，扫码后即可查询账户资产信息。")
 		}
 	} else {
-		if s := strings.Split(a, "-"); len(s) == 2 {
-			for i, ck := range cks {
-				if i+1 >= Int(s[0]) && i+1 <= Int(s[1]) {
-					if !ok {
-						ok = true
-					}
-					handle(&ck)
-				}
-			}
-		} else if x := regexp.MustCompile(`^[\s\d,]+$`).FindString(a); x != "" {
-			xx := regexp.MustCompile(`(\d+)`).FindAllStringSubmatch(a, -1)
-			for i, ck := range cks {
-				for _, x := range xx {
-					if fmt.Sprint(i+1) == x[1] {
-						if !ok {
-							ok = true
-						}
-						handle(&ck)
-					}
-				}
-
-			}
-		} else if a != "" {
-			a = strings.Replace(a, " ", "", -1)
-			for _, ck := range cks {
-				if strings.Contains(ck.Note, a) || strings.Contains(ck.Nickname, a) || strings.Contains(ck.PtPin, a) {
-					if !ok {
-						ok = true
-					}
-					handle(&ck)
-				}
-			}
-		}
-		if !ok {
+		cks = LimitJdCookie(cks, a)
+		if len(cks) == 0 {
 			sender.Reply("没有匹配的账号")
+			return errors.New("没有匹配的账号")
+		} else {
+			for _, ck := range cks {
+				handle(&ck)
+			}
 		}
 	}
-
+	return nil
 }
 
 var codeSignals = []CodeSignal{
@@ -276,19 +252,84 @@ var codeSignals = []CodeSignal{
 	{
 		Command: []string{"许愿", "wish", "hope", "want"},
 		Handle: func(sender *Sender) interface{} {
-			b := GetCoin(sender.UserID)
-			if b < 5 {
-				return "许愿币不足，需要5个许愿币。"
+			cost := 25
+			if sender.IsAdmin {
+				cost = 1
 			}
-			(&JdCookie{}).Push(fmt.Sprintf("%d许愿%s，许愿币余额%d。", sender.UserID, sender.JoinContens(), b))
-			return fmt.Sprintf("收到许愿，已扣除5个许愿币，余额%d。", RemCoin(sender.UserID, 5))
+			tx := db.Begin()
+			u := &User{}
+			if err := tx.Where("number = ?", sender.UserID).First(u).Error; err != nil {
+				tx.Rollback()
+				return "许愿币不足，先去打卡吧。"
+			}
+			w := &Wish{
+				Content:    sender.JoinContens(),
+				Coin:       cost,
+				UserNumber: sender.UserID,
+			}
+			if w.Content == "" {
+				tx.Rollback()
+				sender.Reply("请对我说 许愿 巴拉巴拉")
+				return nil
+			}
+			if u.Coin < cost {
+				tx.Rollback()
+				return fmt.Sprintf("许愿币不足，需要%d个许愿币。", cost)
+			}
+			if err := tx.Create(w).Error; err != nil {
+				tx.Rollback()
+				return err.Error()
+			}
+			if tx.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin - %d", cost))).RowsAffected == 0 {
+				tx.Rollback()
+				return "扣款失败"
+			}
+			tx.Commit()
+			(&JdCookie{}).Push(fmt.Sprintf("有人许愿%s，愿望id为%d。", w.Content, w.ID))
+			return fmt.Sprintf("收到愿望，已扣除%d个许愿币。", cost)
+		},
+	},
+	{
+		Command: []string{"愿望清单", "wishes"},
+		Handle: func(_ *Sender) interface{} {
+			rt := []string{"\n"}
+			ws := []Wish{}
+			db.Find(&ws)
+			for i, w := range ws {
+				status := "未达成"
+				if w.Status == 1 {
+					status = "已退回"
+				} else if w.Status == 2 {
+					status = "已达成"
+				}
+				rt = append(rt, fmt.Sprintf("%d.\t[%s] %s", i+1, status, w.Content))
+			}
+			return strings.Join(rt, "\n")
 		},
 	},
 	{
 		Command: []string{"run", "执行", "运行"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
-			runTask(&Task{Path: sender.JoinContens()}, sender)
+			name := sender.Contents[0]
+			pins := ""
+			if len(sender.Contents) > 1 {
+				sender.Contents = sender.Contents[1:]
+				err := sender.handleJdCookies(func(ck *JdCookie) {
+					pins += "&" + ck.PtPin
+				})
+				if err != nil {
+					return nil
+				}
+			}
+			envs := []Env{}
+			if pins != "" {
+				envs = append(envs, Env{
+					Name:  "pins",
+					Value: pins,
+				})
+			}
+			runTask(&Task{Path: name, Envs: envs}, sender)
 			return nil
 		},
 	},
@@ -334,7 +375,7 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
-		Command: []string{"set-env", "se"},
+		Command: []string{"set-env", "se", "export"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
 			env := &Env{}
@@ -342,7 +383,7 @@ var codeSignals = []CodeSignal{
 				env.Name = sender.Contents[0]
 				env.Value = strings.Join(sender.Contents[1:], " ")
 			} else if len(sender.Contents) == 1 {
-				ss := regexp.MustCompile(`([^'"=]+)=['"]?([^=]+)['"]?`).FindStringSubmatch(sender.Contents[0])
+				ss := regexp.MustCompile(`^([^'"=]+)=['"]?([^=]+?)['"]?$`).FindStringSubmatch(sender.Contents[0])
 				if len(ss) != 3 {
 					return "无法解析"
 				}
@@ -356,7 +397,7 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
-		Command: []string{"unset-env", "ue"},
+		Command: []string{"unset-env", "ue", "unexport", "de"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
 			UnExportEnv(&Env{
@@ -386,6 +427,20 @@ var codeSignals = []CodeSignal{
 			mx[sender.UserID] = true
 			AddCoin(sender.UserID)
 			return "许愿币+1"
+		},
+	},
+	{
+		Command: []string{"退还许愿币"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			if len(sender.Contents) == 2 {
+				db.Model(User{}).Where("number = " + sender.Contents[1]).Updates(map[string]interface{}{
+					"coin": gorm.Expr("coin+" + sender.Contents[1]),
+				})
+				return "操作成功"
+			} else {
+				return "操作异常"
+			}
 		},
 	},
 	{
@@ -444,6 +499,94 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
+	{
+		Command: []string{"转账"},
+		Handle: func(sender *Sender) interface{} {
+			if sender.ReplySenderUserID == 0 {
+				return "没有转账目标"
+			}
+			amount := Int(sender.JoinContens())
+			if !sender.IsAdmin {
+				if amount <= 0 {
+					return "转账金额必须大于等于1"
+				}
+			}
+			if sender.UserID == sender.ReplySenderUserID {
+				return "转账成功"
+			}
+			if amount > 10000 {
+				return "单笔转账限额10000"
+			}
+			tx := db.Begin()
+			s := &User{}
+			if err := db.Where("number = ?", sender.UserID).First(&s).Error; err != nil {
+				tx.Rollback()
+				return "你还没有开通钱包功能"
+			}
+			if s.Coin < amount {
+				tx.Rollback()
+				return "余额不足"
+			}
+			r := &User{}
+			if err := db.Where("number = ?", sender.ReplySenderUserID).First(&r).Error; err != nil {
+				tx.Rollback()
+				return "他还没有开通钱包功能"
+			}
+			if tx.Model(User{}).Where("number = ?", sender.UserID).Updates(map[string]interface{}{
+				"coin": gorm.Expr(fmt.Sprintf("coin - %d", amount)),
+			}).RowsAffected == 0 {
+				tx.Rollback()
+				return "转账失败"
+			}
+			if tx.Model(User{}).Where("number = ?", sender.ReplySenderUserID).Updates(map[string]interface{}{
+				"coin": gorm.Expr(fmt.Sprintf("coin + %d", amount)),
+			}).RowsAffected == 0 {
+				tx.Rollback()
+				return "转账失败"
+			}
+			tx.Commit()
+			return fmt.Sprintf("转账成功，你的余额%d，他的余额%d。", s.Coin-amount, r.Coin+amount)
+		},
+	},
+	{
+		Command: []string{"献祭", "导出"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			sender.handleJdCookies(func(ck *JdCookie) {
+				sender.Reply(fmt.Sprintf("pt_key=%s;pt_pin=%s;", ck.PtKey, ck.PtPin))
+			})
+			return nil
+		},
+	},
 }
 
 var mx = map[int]bool{}
+
+func LimitJdCookie(cks []JdCookie, a string) []JdCookie {
+	ncks := []JdCookie{}
+	if s := strings.Split(a, "-"); len(s) == 2 {
+		for i, ck := range cks {
+			if i+1 >= Int(s[0]) && i+1 <= Int(s[1]) {
+				ncks = append(ncks, ck)
+			}
+		}
+	} else if x := regexp.MustCompile(`^[\s\d,]+$`).FindString(a); x != "" {
+		xx := regexp.MustCompile(`(\d+)`).FindAllStringSubmatch(a, -1)
+		for i, ck := range cks {
+			for _, x := range xx {
+				if fmt.Sprint(i+1) == x[1] {
+					ncks = append(ncks, ck)
+				}
+			}
+
+		}
+	} else if a != "" {
+		a = strings.Replace(a, " ", "", -1)
+		for _, ck := range cks {
+			if strings.Contains(ck.Note, a) || strings.Contains(ck.Nickname, a) || strings.Contains(ck.PtPin, a) {
+				ncks = append(ncks, ck)
+			}
+		}
+	}
+	return ncks
+}
