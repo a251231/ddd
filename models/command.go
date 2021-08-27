@@ -250,10 +250,9 @@ var codeSignals = []CodeSignal{
 			if len(sender.Contents) < 2 {
 				sender.Reply("发送指令格式错误")
 			} else {
-				rt := strings.Join(sender.Contents[1:], "\n")
-				sender.Contents = sender.Contents[0:0]
+				rt := strings.Join(sender.Contents[1:], " ")
+				sender.Contents = sender.Contents[0:1]
 				if sender.handleJdCookies(func(ck *JdCookie) {
-					fmt.Println(ck)
 					ck.Push(rt)
 				}) == nil {
 					return "操作成功"
