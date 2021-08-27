@@ -59,20 +59,20 @@ func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) error {
 	a := sender.JoinContens()
 	ok := false
 	if !sender.IsAdmin || a == "" {
-		for _, ck := range cks {
+		for i := range cks {
 			if strings.Contains(sender.Type, "qq") {
-				if ck.QQ == sender.UserID {
+				if cks[i].QQ == sender.UserID {
 					if !ok {
 						ok = true
 					}
-					handle(&ck)
+					handle(&cks[i])
 				}
 			} else if strings.Contains(sender.Type, "tg") {
-				if ck.Telegram == sender.UserID {
+				if cks[i].Telegram == sender.UserID {
 					if !ok {
 						ok = true
 					}
-					handle(&ck)
+					handle(&cks[i])
 				}
 			}
 		}
@@ -86,8 +86,8 @@ func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) error {
 			sender.Reply("没有匹配的账号")
 			return errors.New("没有匹配的账号")
 		} else {
-			for _, ck := range cks {
-				handle(&ck)
+			for i := range cks {
+				handle(&cks[i])
 			}
 		}
 	}
@@ -247,7 +247,18 @@ var codeSignals = []CodeSignal{
 		Command: []string{"发送", "send"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
-			b.Send(tgg, sender.JoinContens())
+			if len(sender.Contents) < 2 {
+				sender.Reply("发送指令格式错误")
+			} else {
+				rt := strings.Join(sender.Contents[1:], "\n")
+				sender.Contents = sender.Contents[0:0]
+				if sender.handleJdCookies(func(ck *JdCookie) {
+					fmt.Println(ck)
+					ck.Push(rt)
+				}) == nil {
+					return "操作成功"
+				}
+			}
 			return nil
 		},
 	},
@@ -637,26 +648,26 @@ var mx = map[int]bool{}
 func LimitJdCookie(cks []JdCookie, a string) []JdCookie {
 	ncks := []JdCookie{}
 	if s := strings.Split(a, "-"); len(s) == 2 {
-		for i, ck := range cks {
+		for i := range cks {
 			if i+1 >= Int(s[0]) && i+1 <= Int(s[1]) {
-				ncks = append(ncks, ck)
+				ncks = append(ncks, cks[i])
 			}
 		}
 	} else if x := regexp.MustCompile(`^[\s\d,]+$`).FindString(a); x != "" {
 		xx := regexp.MustCompile(`(\d+)`).FindAllStringSubmatch(a, -1)
-		for i, ck := range cks {
+		for i := range cks {
 			for _, x := range xx {
 				if fmt.Sprint(i+1) == x[1] {
-					ncks = append(ncks, ck)
+					ncks = append(ncks, cks[i])
 				}
 			}
 
 		}
 	} else if a != "" {
 		a = strings.Replace(a, " ", "", -1)
-		for _, ck := range cks {
-			if strings.Contains(ck.Note, a) || strings.Contains(ck.Nickname, a) || strings.Contains(ck.PtPin, a) {
-				ncks = append(ncks, ck)
+		for i := range cks {
+			if strings.Contains(cks[i].Note, a) || strings.Contains(cks[i].Nickname, a) || strings.Contains(cks[i].PtPin, a) {
+				ncks = append(ncks, cks[i])
 			}
 		}
 	}
