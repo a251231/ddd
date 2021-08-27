@@ -157,7 +157,7 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
-		Command: []string{"coin", "许愿币", "余额"},
+		Command: []string{"coin", "许愿币", "余额", "yu", "yue"},
 		Handle: func(sender *Sender) interface{} {
 			return fmt.Sprintf("余额%d", GetCoin(sender.UserID))
 		},
@@ -277,12 +277,19 @@ var codeSignals = []CodeSignal{
 				baga = u.Coin
 				cost = u.Coin
 			}
-			if time.Now().Nanosecond()%10 < 6 || baga > 0 {
+			r := time.Now().Nanosecond() % 10
+			if r < 5 || baga > 0 {
 				sender.Reply(fmt.Sprintf("很遗憾你失去了%d枚许愿币。", cost))
 				cost = -cost
 			} else {
-				sender.Reply(fmt.Sprintf("很幸运你获得%d枚许愿币，10秒后自动转入余额。", cost))
-				time.Sleep(time.Second * 10)
+				if r == 9 {
+					cost *= 2
+					sender.Reply(fmt.Sprintf("恭喜你幸运暴击获得%d枚许愿币，20秒后自动转入余额。", cost))
+					time.Sleep(time.Second * 20)
+				} else {
+					sender.Reply(fmt.Sprintf("很幸运你获得%d枚许愿币，10秒后自动转入余额。", cost))
+					time.Sleep(time.Second * 10)
+				}
 				sender.Reply(fmt.Sprintf("%d枚许愿币已到账。", cost))
 			}
 			db.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin + %d", cost)))
@@ -317,11 +324,11 @@ var codeSignals = []CodeSignal{
 					if sender.IsAdmin {
 						id = w.ID
 					}
-					rt = append(rt, fmt.Sprintf("%d.\t %s [%s]", id, w.Content, status))
+					rt = append(rt, fmt.Sprintf("%d. %s [%s]", id, w.Content, status))
 				}
 				return strings.Join(rt, "\n")
 			}
-			cost := 66
+			cost := 88
 			if sender.IsAdmin {
 				cost = 1
 			}
@@ -354,7 +361,7 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
-		Command: []string{"愿望达成"},
+		Command: []string{"愿望达成", "达成愿望"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
 			w := &Wish{}
@@ -401,6 +408,21 @@ var codeSignals = []CodeSignal{
 				})
 			}
 			runTask(&Task{Path: name, Envs: envs}, sender)
+			return nil
+		},
+	},
+	{
+		Command: []string{"优先级", "priority"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			priority := Int(sender.Contents[0])
+			if len(sender.Contents) > 1 {
+				sender.Contents = sender.Contents[1:]
+				sender.handleJdCookies(func(ck *JdCookie) {
+					ck.Update(Priority, priority)
+					sender.Reply(fmt.Sprintf("已设置账号%s(%s)的优先级为%d。", ck.PtPin, ck.Nickname, priority))
+				})
+			}
 			return nil
 		},
 	},
