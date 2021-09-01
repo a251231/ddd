@@ -83,6 +83,12 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 		}
 	}
 	switch msg {
+		{
+			if strings.Contains(msg, "wskey=") {
+				cmd(fmt.Sprintf(`wskey="%s" python3 wspt.py`, msg), sender)
+				return nil
+					}
+		}
 	default:
 		{ //tyt
 			ss := regexp.MustCompile(`packetId=(\S+)(&|&amp;)currentActId`).FindStringSubmatch(msg)
@@ -103,6 +109,19 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 		}
 		{ //
 			ss := regexp.MustCompile(`pt_key=([^;=\s]+);pt_pin=([^;=\s]+)`).FindAllStringSubmatch(msg, -1)
+			if len(ss) == 0 {
+                pt_key := FetchJdCookieValue("pt_key", msg)
+                pt_pin := FetchJdCookieValue("pt_pin", msg)
+                if pt_key != "" && pt_pin != "" {
+                 ss = [][]string{
+                  {
+                   "",
+                   pt_key,
+                   pt_pin,
+                  },
+                 }
+                }
+               }
 
 			if len(ss) > 0 {
 
